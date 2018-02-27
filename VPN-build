@@ -6,6 +6,7 @@ CentOS release 6.5 (Final)
 
 
 同步时间
+
 date -s "2017-08-27 14:18:40"
 
 创建软件存放目录
