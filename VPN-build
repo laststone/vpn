@@ -2,7 +2,8 @@
 CentOS release 6.5 (Final)
 
 [root@CT6-1 ~]# uname -r
-2.6.32-431.el6.x86_64
+
+2.6.32-431.el6.x86_64  
 
 
 同步时间
