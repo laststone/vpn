@@ -1,625 +1,74 @@
-[root@CT6-1 ~]# cat /etc/redhat-release 
-CentOS release 6.5 (Final)
 
 
-[root@CT6-1 ~]# uname -r
-  
-  
-  
-2.6.32-431.el6.x86_64  
+架构:  本地 ---vpn----> ucloud上的download主机 ----> 访问(ucloud上的deploy上的gitlab和jenkins)和其他任意非download主机的地址
 
 
-同步时间
-date -s "2017-08-27 14:18:40"
+1.拉取vpn镜像:
+docker pull kylemanna/openvpn:2.4
 
-创建软件存放目录
-mkdir -p /home/oldboy/tools/openvpn
+2.创建vpn配置文件在本机的存放目录
+mkdir -p /data/openvpn
 
-[root@CT6-1 ~]# cd /home/oldboy/tools/openvpn/
+3.生成配置文件
+docker run -v /data/openvpn:/etc/openvpn --rm kylemanna/openvpn:2.4 ovpn_genconfig -u tcp://1.1.1.1
 
-安装gcc
-yum -y install gcc
+4.生成密钥文件(密码admin123456)
+docker run -v /data/openvpn:/etc/openvpn --rm -it kylemanna/openvpn:2.4 ovpn_initpki
+`````
+输入私钥密码（输入时是看不见的）：
+Enter PEM pass phrase:admin123456
+再输入一遍
+Verifying - Enter PEM pass phrase:admin123456
+输入一个CA名称（我这里直接回车）
+Common Name (eg: your user, host, or server name) [Easy-RSA CA]:
+输入刚才设置的私钥密码（输入完成后会再让输入一次）
+Enter pass phrase for /etc/openvpn/pki/private/ca.key:admin123456
+`````
 
-安装lzo压缩模块
-[root@CT6-1 openvpn]# wget http://www.oberhumer.com/opensource/lzo/download/lzo-2.06.tar.gz
+5.生成客户端证书(zhangsan替换成用户名)
+docker run -v /data/openvpn:/etc/openvpn --rm -it kylemanna/openvpn:2.4 easyrsa build-client-full zhangsan nopass
 
-[root@CT6-1 openvpn]# tar zxf lzo-2.06.tar.gz 
-[root@CT6-1 openvpn]# cd lzo-2.06
-[root@CT6-1 lzo-2.06]# ./configure && make && make install
-[root@CT6-1 lzo-2.06]# cd ..
-[root@CT6-1 openvpn]# 
+6.导出客户端证书
+mkdir -p /data/openvpn/conf
+docker run -v /data/openvpn:/etc/openvpn --rm kylemanna/openvpn:2.4 ovpn_getclient zhangsan > /data/openvpn/conf/zhangsan.ovpn
 
+10.启动VPN (注意选择连接类型为TCP)
+docker run --name openvpn -v /data/openvpn:/etc/openvpn -d -p 1194:1194/tcp --cap-add=NET_ADMIN kylemanna/openvpn:2.4
 
-上传vpn源码包并安装
-===========================================
-[root@CT6-1 openvpn]# yum -y install lrzsz
-安装openssl（编译openvpn时需要）
-[root@CT6-1 openvpn]# rpm -qa openssl
-openssl-1.0.1e-15.el6.x86_64
-[root@CT6-1 openvpn]# 
-[root@CT6-1 openvpn]# yum -y install openssl*
+11.设置防火墙规则(略)
 
-[root@CT6-1 openvpn]# rz
-[root@CT6-1 openvpn]# ls
-lzo-2.06  lzo-2.06.tar.gz  openvpn-2.2.2.tar.gz
-[root@CT6-1 openvpn]# tar zxf openvpn-2.2.2.tar.gz 
-[root@CT6-1 openvpn]# cd openvpn-2.2.2
-[root@CT6-1 openvpn-2.2.2]# ./configure --with-lzo-headers=/usr/local/include/ --with-lzo-lib=/usr/local/lib
-[root@CT6-1 openvpn-2.2.2]# make && make install
-[root@CT6-1 openvpn-2.2.2]# cd ..
-[root@CT6-1 openvpn]# which openvpn
-/usr/local/sbin/openvpn
+12.下载客户端证书给客户使用
+sz /data/openvpn/conf/zhangsan.ovpn
 
 
-配置openvpn server-建立CA(Certificate Authority)
-====================================================
-[root@CT6-1 openvpn]# cd /home/oldboy/tools/openvpn/
-[root@CT6-1 openvpn]# cd openvpn-2.2.2/easy-rsa/2.0/
-备份vars
-[root@CT6-1 2.0]# cp vars vars.oldboy.20170827
-[root@CT6-1 2.0]# ls vars*
-vars  vars.oldboy.20170827
-[root@CT6-1 2.0]# 
-编辑vars文件，在文件尾修改这几行
-[root@CT6-1 2.0]# vim vars
-[root@CT6-1 2.0]# tail -12 vars
-# Don't leave any of these fields blank.
-export KEY_COUNTRY="CN"
-export KEY_PROVINCE="BJ"
-export KEY_CITY="BeiJing"
-export KEY_ORG="oldboy"
-export KEY_EMAIL="490000448@qq.com"
-export KEY_EMAIL=490000448@qq.com
-export KEY_CN=CN
-export KEY_NAME=oldboy
-export KEY_OU=oldboy
-export PKCS11_MODULE_PATH=changeme
-export PKCS11_PIN=1234
-[root@CT6-1 2.0]# 
-重新加载，使配置文件生效
-[root@CT6-1 2.0]# source vars
-NOTE: If you run ./clean-all, I will be doing a rm -rf on /home/oldboy/tools/openvpn/openvpn-2.2.2/easy-rsa/2.0/keys
-[root@CT6-1 2.0]# 
-清除所有证书keys，并重新生成CA证书
-[root@CT6-1 2.0]# ./clean-all 
-[root@CT6-1 2.0]# ./build-ca 
-Generating a 1024 bit RSA private key
-......++++++
-...........................................++++++
-writing new private key to 'ca.key'
------
-You are about to be asked to enter information that will be incorporated
-into your certificate request.
-What you are about to enter is what is called a Distinguished Name or a DN.
-There are quite a few fields but you can leave some blank
-For some fields there will be a default value,
-If you enter '.', the field will be left blank.
------
-Country Name (2 letter code) [CN]:
-State or Province Name (full name) [BJ]:
-Locality Name (eg, city) [BeiJing]:
-Organization Name (eg, company) [oldboy]:
-Organizational Unit Name (eg, section) [oldboy]:
-Common Name (eg, your name or your server's hostname) [CN]:oldboy
-Name [oldboy]:
-Email Address [490000448@qq.com]:
-[root@CT6-1 2.0]# 
-最后会生成几个ca文件
-[root@CT6-1 2.0]# ll keys/
-总用量 12
--rw-r--r--. 1 root root 1314 8月  27 15:06 ca.crt （证书）
--rw-------. 1 root root  916 8月  27 15:06 ca.key （私钥或秘钥）
--rw-r--r--. 1 root root    0 8月  27 15:05 index.txt
--rw-r--r--. 1 root root    3 8月  27 15:05 serial
-[root@CT6-1 2.0]#
+13. mac用户下载Tunnelblick,windows用户下载openvpn客户端安装该证书
 
 
-生成服务器端证书和秘钥文件 （自定义取名为server）
-=========================================================
-[root@CT6-1 2.0]# ./build-key-server  server
-Generating a 1024 bit RSA private key
-................++++++
-...................................................++++++
-writing new private key to 'server.key'
------
-You are about to be asked to enter information that will be incorporated
-into your certificate request.
-What you are about to enter is what is called a Distinguished Name or a DN.
-There are quite a few fields but you can leave some blank
-For some fields there will be a default value,
-If you enter '.', the field will be left blank.
------
-Country Name (2 letter code) [CN]:
-State or Province Name (full name) [BJ]:
-Locality Name (eg, city) [BeiJing]:
-Organization Name (eg, company) [oldboy]:
-Organizational Unit Name (eg, section) [oldboy]:
-Common Name (eg, your name or your server's hostname) [server]:
-Name [oldboy]:
-Email Address [490000448@qq.com]:
 
-Please enter the following 'extra' attributes
-to be sent with your certificate request
-A challenge password []:123456
-An optional company name []:oldboy
-Using configuration from /home/oldboy/tools/openvpn/openvpn-2.2.2/easy-rsa/2.0/openssl-1.0.0.cnf
-Check that the request matches the signature
-Signature ok
-The Subject's Distinguished Name is as follows
-countryName           :PRINTABLE:'CN'
-stateOrProvinceName   :PRINTABLE:'BJ'
-localityName          :PRINTABLE:'BeiJing'
-organizationName      :PRINTABLE:'oldboy'
-organizationalUnitName:PRINTABLE:'oldboy'
-commonName            :PRINTABLE:'server'
-name                  :PRINTABLE:'oldboy'
-emailAddress          :IA5STRING:'490000448@qq.com'
-Certificate is to be certified until Aug 25 07:11:47 2027 GMT (3650 days)
-Sign the certificate? [y/n]:y
+13.为了方便管理: 使用如下两个脚本来删除用户和创建用户
+## 创建用户
+-----------------------
+#!/bin/bash
+read -p "please your username: " NAME
+docker run -v /data/openvpn:/etc/openvpn --rm -it kylemanna/openvpn:2.4 easyrsa build-client-full $NAME nopass
+docker run -v /data/openvpn:/etc/openvpn --rm kylemanna/openvpn:2.4 ovpn_getclient $NAME > /data/openvpn/conf/"$NAME".ovpn
+docker restart openvpn
+注意: 需要手动修改xx.ovpn文件中的vpn端口为11194 (默认是1194) --- 否则不能连接
+-----------------------
+##删除用户
+-----------------------
+#!/bin/bash
+read -p "Delete username: " DNAME
+docker run -v /data/openvpn:/etc/openvpn --rm -it kylemanna/openvpn:2.4 easyrsa revoke $DNAME
+docker run -v /data/openvpn:/etc/openvpn --rm -it kylemanna/openvpn:2.4 easyrsa gen-crl
+docker run -v /data/openvpn:/etc/openvpn --rm -it kylemanna/openvpn:2.4 rm -f /etc/openvpn/pki/reqs/"$DNAME".req
+docker run -v /data/openvpn:/etc/openvpn --rm -it kylemanna/openvpn:2.4 rm -f /etc/openvpn/pki/private/"$DNAME".key
+docker run -v /data/openvpn:/etc/openvpn --rm -it kylemanna/openvpn:2.4 rm -f /etc/openvpn/pki/issued/"$DNAME".crt
+docker restart openvpn
+rm -rf  /data/openvpn/conf/$DNAME.ovpn
+-----------------------
+注意: 删除一个用户后,需要删除其在/data/openvpn/conf/下的username.ovpn文件
 
-1 out of 1 certificate requests certified, commit? [y/n]y
-Write out database with 1 new entries
-Data Base Updated
-[root@CT6-1 2.0]# 
-[root@CT6-1 2.0]# ll keys/
-总用量 40
--rw-r--r--. 1 root root 4002 8月  27 15:11 01.pem
--rw-r--r--. 1 root root 1314 8月  27 15:06 ca.crt
--rw-------. 1 root root  916 8月  27 15:06 ca.key
--rw-r--r--. 1 root root  121 8月  27 15:11 index.txt
--rw-r--r--. 1 root root   21 8月  27 15:11 index.txt.attr
--rw-r--r--. 1 root root    0 8月  27 15:05 index.txt.old
--rw-r--r--. 1 root root    3 8月  27 15:11 serial
--rw-r--r--. 1 root root    3 8月  27 15:05 serial.old
--rw-r--r--. 1 root root 4002 8月  27 15:11 server.crt （生成的服务证书）
--rw-r--r--. 1 root root  769 8月  27 15:11 server.csr （生成的服务XX）
--rw-------. 1 root root  920 8月  27 15:11 server.key （生成的服务秘钥）
-[root@CT6-1 2.0]# 
 
-
-生成客户端证书和秘钥文件 （创建两份：test和ett）
-（自定义取名为test，工作中一般用人名来生成，给对应的人使用）
-=================================================================
-[root@CT6-1 2.0]# ./build-key test  （使用build-key生成的客户端证书，拨号登录的时候不需要密码）
-Generating a 1024 bit RSA private key
-....++++++
-.....................++++++
-writing new private key to 'test.key'
------
-You are about to be asked to enter information that will be incorporated
-into your certificate request.
-What you are about to enter is what is called a Distinguished Name or a DN.
-There are quite a few fields but you can leave some blank
-For some fields there will be a default value,
-If you enter '.', the field will be left blank.
------
-Country Name (2 letter code) [CN]:
-State or Province Name (full name) [BJ]:
-Locality Name (eg, city) [BeiJing]:
-Organization Name (eg, company) [oldboy]:
-Organizational Unit Name (eg, section) [oldboy]:
-Common Name (eg, your name or your server's hostname) [test]:
-Name [oldboy]:
-Email Address [490000448@qq.com]:
-
-Please enter the following 'extra' attributes
-to be sent with your certificate request
-A challenge password []:123456
-An optional company name []:oldboy   
-Using configuration from /home/oldboy/tools/openvpn/openvpn-2.2.2/easy-rsa/2.0/openssl-1.0.0.cnf
-Check that the request matches the signature
-Signature ok
-The Subject's Distinguished Name is as follows
-countryName           :PRINTABLE:'CN'
-stateOrProvinceName   :PRINTABLE:'BJ'
-localityName          :PRINTABLE:'BeiJing'
-organizationName      :PRINTABLE:'oldboy'
-organizationalUnitName:PRINTABLE:'oldboy'
-commonName            :PRINTABLE:'test'
-name                  :PRINTABLE:'oldboy'
-emailAddress          :IA5STRING:'490000448@qq.com'
-Certificate is to be certified until Aug 25 07:18:32 2027 GMT (3650 days)
-Sign the certificate? [y/n]:y
-
-1 out of 1 certificate requests certified, commit? [y/n]y
-Write out database with 1 new entries
-Data Base Updated
-[root@CT6-1 2.0]# 
-[root@CT6-1 2.0]# ll keys/
-总用量 64
--rw-r--r--. 1 root root 4002 8月  27 15:11 01.pem
--rw-r--r--. 1 root root 3878 8月  27 15:18 02.pem
--rw-r--r--. 1 root root 1314 8月  27 15:06 ca.crt
--rw-------. 1 root root  916 8月  27 15:06 ca.key
--rw-r--r--. 1 root root  240 8月  27 15:18 index.txt
--rw-r--r--. 1 root root   21 8月  27 15:18 index.txt.attr
--rw-r--r--. 1 root root   21 8月  27 15:11 index.txt.attr.old
--rw-r--r--. 1 root root  121 8月  27 15:11 index.txt.old
--rw-r--r--. 1 root root    3 8月  27 15:18 serial
--rw-r--r--. 1 root root    3 8月  27 15:11 serial.old
--rw-r--r--. 1 root root 4002 8月  27 15:11 server.crt
--rw-r--r--. 1 root root  769 8月  27 15:11 server.csr
--rw-------. 1 root root  920 8月  27 15:11 server.key
--rw-r--r--. 1 root root 3878 8月  27 15:18 test.crt （客户的证书）
--rw-r--r--. 1 root root  769 8月  27 15:18 test.csr （客户的XX）
--rw-------. 1 root root  916 8月  27 15:18 test.key （客户的秘钥）
-[root@CT6-1 2.0]# 
-
-
-
-[root@CT6-1 2.0]# ./build-key-pass ett
-（使用build-key-pass生成的客户端证书，拨号登录的时候必须要输入密码）
-Generating a 1024 bit RSA private key
-.......++++++
-.......++++++
-writing new private key to 'ett.key'
-Enter PEM pass phrase:         （这里设置拨号密码123456，默认是看不见的！）
-Verifying - Enter PEM pass phrase:
------
-You are about to be asked to enter information that will be incorporated
-into your certificate request.
-What you are about to enter is what is called a Distinguished Name or a DN.
-There are quite a few fields but you can leave some blank
-For some fields there will be a default value,
-If you enter '.', the field will be left blank.
------
-Country Name (2 letter code) [CN]:
-State or Province Name (full name) [BJ]:
-Locality Name (eg, city) [BeiJing]:
-Organization Name (eg, company) [oldboy]:
-Organizational Unit Name (eg, section) [oldboy]:
-Common Name (eg, your name or your server's hostname) [ett]:
-Name [oldboy]:
-Email Address [490000448@qq.com]:
-
-Please enter the following 'extra' attributes
-to be sent with your certificate request
-A challenge password []:123456
-An optional company name []:oldboy
-Using configuration from /home/oldboy/tools/openvpn/openvpn-2.2.2/easy-rsa/2.0/openssl-1.0.0.cnf
-Check that the request matches the signature
-Signature ok
-The Subject's Distinguished Name is as follows
-countryName           :PRINTABLE:'CN'
-stateOrProvinceName   :PRINTABLE:'BJ'
-localityName          :PRINTABLE:'BeiJing'
-organizationName      :PRINTABLE:'oldboy'
-organizationalUnitName:PRINTABLE:'oldboy'
-commonName            :PRINTABLE:'ett'
-name                  :PRINTABLE:'oldboy'
-emailAddress          :IA5STRING:'490000448@qq.com'
-Certificate is to be certified until Aug 25 07:25:09 2027 GMT (3650 days)
-Sign the certificate? [y/n]:y
-
-1 out of 1 certificate requests certified, commit? [y/n]y
-Write out database with 1 new entries
-Data Base Updated
-[root@CT6-1 2.0]# 
-[root@CT6-1 2.0]# ll keys/
-总用量 80
--rw-r--r--. 1 root root 4002 8月  27 15:11 01.pem
--rw-r--r--. 1 root root 3878 8月  27 15:18 02.pem
--rw-r--r--. 1 root root 3877 8月  27 15:25 03.pem
--rw-r--r--. 1 root root 1314 8月  27 15:06 ca.crt
--rw-------. 1 root root  916 8月  27 15:06 ca.key
--rw-r--r--. 1 root root 3877 8月  27 15:25 ett.crt （生成的需要密码的客户端证书）
--rw-r--r--. 1 root root  765 8月  27 15:25 ett.csr （生成的需要密码的客户端XX）
--rw-------. 1 root root 1041 8月  27 15:25 ett.key （生成的需要密码的客户端秘钥）
--rw-r--r--. 1 root root  358 8月  27 15:25 index.txt
--rw-r--r--. 1 root root   21 8月  27 15:25 index.txt.attr
--rw-r--r--. 1 root root   21 8月  27 15:18 index.txt.attr.old
--rw-r--r--. 1 root root  240 8月  27 15:18 index.txt.old
--rw-r--r--. 1 root root    3 8月  27 15:25 serial
--rw-r--r--. 1 root root    3 8月  27 15:18 serial.old
--rw-r--r--. 1 root root 4002 8月  27 15:11 server.crt
--rw-r--r--. 1 root root  769 8月  27 15:11 server.csr
--rw-------. 1 root root  920 8月  27 15:11 server.key
--rw-r--r--. 1 root root 3878 8月  27 15:18 test.crt
--rw-r--r--. 1 root root  769 8月  27 15:18 test.csr
--rw-------. 1 root root  916 8月  27 15:18 test.key
-[root@CT6-1 2.0]# 
-
-注意：如果公司有100个人要使用VPN，就要执行上述生成证书命令100次
-
-
-
-利用hellman算法，生成交换秘钥的协议文件
-========================================================================
-[root@CT6-1 2.0]# ./build-dh 
-Generating DH parameters, 1024 bit long safe prime, generator 2
-This is going to take a long time
-....+..+.............................................................................+..........+..+.................................+...........+..+.................+....+....................................................................................................................+..............+......+........+...+.........+..........................................+..................+........................................................................................................+.......................+...........................................................................................................................................++*++*++*
-[root@CT6-1 2.0]# 
-[root@CT6-1 2.0]# ll keys/dh1024.pem 
--rw-r--r--. 1 root root 245 8月  27 15:30 keys/dh1024.pem （该步骤生的的协议文件）
-[root@CT6-1 2.0]# 
-
-
-
-生成防止恶意攻击（DOS、UDP port flooding）的"HMAC firewall"文件
-======================================================================
-[root@CT6-1 2.0]# openvpn --genkey --secret keys/ta.key
-[root@CT6-1 2.0]# 
-[root@CT6-1 2.0]# ls keys/ta.key 
-keys/ta.key
-[root@CT6-1 2.0]#
-
-
-VPN服务器端重要命令说明
-====================================================================
-vars	是用来创建环境变量，设置所需要的变量的脚本
-clean-all	是创建生成ca证书及秘钥文件所需要的文件及目录
-build-ca	是生成ca证书（交互）
-build-dh	是生成Diff-Hellman文件（交互）
-build-key-server	生成服务器端秘钥（交互）
-build-key 	生成客户端秘钥（交互）
-build-key-pass	生成带密码的客户端秘钥（交互）
-pkitool		直接使用vars的环境变量设置，直接生成证书（非交互）
-
-规整：VPN服务器端配置
-===================================================================
-创建专门存放vpn证书的目录
-[root@CT6-1 2.0]# mkdir /etc/openvpn
-[root@CT6-1 2.0]# 
-将上述生成的证书目录（keys）转而存放于此
-[root@CT6-1 2.0]# cd /home/oldboy/tools/openvpn/openvpn-2.2.2/easy-rsa/2.0/
-[root@CT6-1 2.0]# ll
-总用量 136
--rwxrwxr-x. 1  500  500   119 11月 25 2011 build-ca
--rwxrwxr-x. 1  500  500   352 11月 25 2011 build-dh
--rwxrwxr-x. 1  500  500   188 11月 25 2011 build-inter
--rwxrwxr-x. 1  500  500   163 11月 25 2011 build-key
--rwxrwxr-x. 1  500  500   157 11月 25 2011 build-key-pass
--rwxrwxr-x. 1  500  500   249 11月 25 2011 build-key-pkcs12
--rwxrwxr-x. 1  500  500   268 11月 25 2011 build-key-server
--rwxrwxr-x. 1  500  500   213 11月 25 2011 build-req
--rwxrwxr-x. 1  500  500   158 11月 25 2011 build-req-pass
--rwxrwxr-x. 1  500  500   428 11月 25 2011 clean-all
--rwxrwxr-x. 1  500  500  1457 11月 25 2011 inherit-inter
-drwx------. 2 root root  4096 8月  27 15:37 keys
--rwxrwxr-x. 1  500  500   295 11月 25 2011 list-crl
--rw-rw-r--. 1  500  500   413 11月 25 2011 Makefile
--rwxrwxr-x. 1  500  500  7768 10月 21 2010 openssl-0.9.6.cnf
--rwxrwxr-x. 1  500  500  8325 11月 25 2011 openssl-0.9.8.cnf
--rwxrwxr-x. 1  500  500  8222 11月 25 2011 openssl-1.0.0.cnf
--rwxrwxr-x. 1  500  500 12675 11月 25 2011 pkitool
--rw-rw-r--. 1  500  500  9299 11月 25 2011 README
--rwxrwxr-x. 1  500  500   918 11月 25 2011 revoke-full
--rwxrwxr-x. 1  500  500   178 11月 25 2011 sign-req
--rwxrwxr-x. 1  500  500  1818 8月  27 15:00 vars
--rwxr-xr-x. 1 root root  1841 8月  27 14:55 vars.oldboy.20170827
--rwxrwxr-x. 1  500  500   714 11月 25 2011 whichopensslcnf
-[root@CT6-1 2.0]# 
-[root@CT6-1 2.0]# cp -ap keys/  /etc/openvpn/
-将服务器端和客户端的配置文件拷贝于此
-[root@CT6-1 2.0]# cd /home/oldboy/tools/openvpn/openvpn-2.2.2/sample-config-files/
-[root@CT6-1 sample-config-files]# cp client.conf server.conf  /etc/openvpn/
-
-[root@CT6-1 sample-config-files]# yum -y install tree
-[root@CT6-1 sample-config-files]# tree /etc/openvpn/
-/etc/openvpn/
-├── client.conf
-├── keys
-│   ├── 01.pem
-│   ├── 02.pem
-│   ├── 03.pem
-│   ├── ca.crt
-│   ├── ca.key
-│   ├── dh1024.pem
-│   ├── ett.crt
-│   ├── ett.csr
-│   ├── ett.key
-│   ├── index.txt
-│   ├── index.txt.attr
-│   ├── index.txt.attr.old
-│   ├── index.txt.old
-│   ├── serial
-│   ├── serial.old
-│   ├── server.crt
-│   ├── server.csr
-│   ├── server.key
-│   ├── ta.key
-│   ├── test.crt
-│   ├── test.csr
-│   └── test.key
-└── server.conf
-
-1 directory, 24 files
-[root@CT6-1 sample-config-files]# 
-
-
-配置server的配置文件
-=====================================================================
-[root@CT6-1 sample-config-files]# cd /etc/openvpn/
-[root@CT6-1 openvpn]# 
-[root@CT6-1 openvpn]# cp server.conf server.conf.ori 备份server配置文件
-[root@CT6-1 openvpn]# 
-[root@CT6-1 openvpn]# grep -vE ";|#|^$" server.conf > tmp.log
-[root@CT6-1 openvpn]# cat tmp.log > server.conf
-[root@CT6-1 openvpn]# vim server.conf
-
-local 192.168.117.111
-port 52115
-proto tcp
-dev tun
-ca /etc/openvpn/keys/ca.crt
-cert /etc/openvpn/keys/server.crt
-key /etc/openvpn/keys/server.key
-dh /etc/openvpn/keys/dh1024.pem
-server 192.168.117.0 255.255.255.0
-push "route 192.168.118.0 255.255.255.0"
-ifconfig-pool-persist ipp.txt
-keepalive 10 120
-comp-lzo
-persist-key
-persist-tun
-status openvpn-status.log
-verb 3
-client-to-client
-duplicate-cn
-log /var/log/openvpn.log
-
-
-
-调试VPN服务的启动环境
-========================================================================
-1、如有防火墙，就要取消服务器上iptables对openvpn（默认1194，本例52115）的拦截，允许服务转发
-[root@CT6-1 openvpn]# iptables -L -n
-Chain INPUT (policy ACCEPT)
-target     prot opt source               destination         
-ACCEPT     all  --  0.0.0.0/0            0.0.0.0/0           state RELATED,ESTABLISHED 
-ACCEPT     icmp --  0.0.0.0/0            0.0.0.0/0           
-ACCEPT     all  --  0.0.0.0/0            0.0.0.0/0           
-ACCEPT     tcp  --  0.0.0.0/0            0.0.0.0/0           state NEW tcp dpt:22 
-REJECT     all  --  0.0.0.0/0            0.0.0.0/0           reject-with icmp-host-prohibited 
-
-Chain FORWARD (policy ACCEPT)
-target     prot opt source               destination         
-REJECT     all  --  0.0.0.0/0            0.0.0.0/0           reject-with icmp-host-prohibited 
-
-Chain OUTPUT (policy ACCEPT)
-target     prot opt source               destination         
-[root@CT6-1 openvpn]# 
-[root@CT6-1 openvpn]# vim /etc/sysconfig/iptables
-
-# Firewall configuration written by system-config-firewall
-# Manual customization of this file is not recommended.
-*filter
-:INPUT ACCEPT [0:0]
-:FORWARD ACCEPT [0:0]
-:OUTPUT ACCEPT [0:0]
--A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
--A INPUT -p icmp -j ACCEPT
--A INPUT -i lo -j ACCEPT
--A INPUT -p tcp --dport 52115 -j ACCEPT （插入这一行，允许访问52115端口）
--A INPUT -m state --state NEW -m tcp -p tcp --dport 22 -j ACCEPT
--A INPUT -j REJECT --reject-with icmp-host-prohibited
--A FORWARD -j REJECT --reject-with icmp-host-prohibited
-
-[root@CT6-1 openvpn]# 
-[root@CT6-1 openvpn]# iptables -A INPUT -p tcp --dport 52115 -j ACCEPT
-[root@CT6-1 openvpn]# 
-[root@CT6-1 openvpn]# iptables -L -n
-Chain INPUT (policy ACCEPT)
-target     prot opt source               destination         
-ACCEPT     all  --  0.0.0.0/0            0.0.0.0/0           state RELATED,ESTABLISHED 
-ACCEPT     icmp --  0.0.0.0/0            0.0.0.0/0           
-ACCEPT     all  --  0.0.0.0/0            0.0.0.0/0           
-ACCEPT     tcp  --  0.0.0.0/0            0.0.0.0/0           state NEW tcp dpt:22 
-REJECT     all  --  0.0.0.0/0            0.0.0.0/0           reject-with icmp-host-prohibited 
-ACCEPT     tcp  --  0.0.0.0/0            0.0.0.0/0           tcp dpt:52115 
-
-Chain FORWARD (policy ACCEPT)
-target     prot opt source               destination         
-REJECT     all  --  0.0.0.0/0            0.0.0.0/0           reject-with icmp-host-prohibited 
-
-Chain OUTPUT (policy ACCEPT)
-target     prot opt source               destination         
-[root@CT6-1 openvpn]# 
-[root@CT6-1 openvpn]# /etc/init.d/iptables stop
-iptables：将链设置为政策 ACCEPT：filter                    [确定]
-iptables：清除防火墙规则：                                 [确定]
-iptables：正在卸载模块：                                   [确定]
-[root@CT6-1 openvpn]# （调试之前，停掉iptables）
-
-2、关闭selinux
-[root@CT6-1 openvpn]# setenforce 0
-[root@CT6-1 openvpn]# 
-
-3、开启内核转发功能
-[root@CT6-1 openvpn]# vim /etc/sysctl.conf 
-
-# Kernel sysctl configuration file for Red Hat Linux
-#
-# For binary values, 0 is disabled, 1 is enabled.  See sysctl(8) and
-# sysctl.conf(5) for more details.
-
-# Controls IP packet forwarding
-net.ipv4.ip_forward = 1 （变0为1开启路由转发）
-
-# Controls source route verification
-net.ipv4.conf.default.rp_filter = 1
-
-[root@CT6-1 openvpn]# sysctl -p  （刷新）
-net.ipv4.ip_forward = 1
-net.ipv4.conf.default.rp_filter = 1
-net.ipv4.conf.default.accept_source_route = 0
-kernel.sysrq = 0
-kernel.core_uses_pid = 1
-net.ipv4.tcp_syncookies = 1
-error: "net.bridge.bridge-nf-call-ip6tables" is an unknown key
-error: "net.bridge.bridge-nf-call-iptables" is an unknown key
-error: "net.bridge.bridge-nf-call-arptables" is an unknown key
-kernel.msgmnb = 65536
-kernel.msgmax = 65536
-kernel.shmmax = 68719476736
-kernel.shmall = 4294967296
-[root@CT6-1 openvpn]# 
-
-
-启动VPN server并调试
-====================================================================
-用绝对路径启动openvpn，并放入后台
-[root@CT6-1 openvpn]# /usr/local/sbin/openvpn  --config /etc/openvpn/server.conf &
-[1] 38518
-[root@CT6-1 openvpn]# 
-[root@CT6-1 openvpn]# netstat -lntup| grep vpn
-tcp      0      0 192.168.117.111:52115     0.0.0.0:*       LISTEN     38518/openvpn       
-[root@CT6-1 openvpn]# 
-启动完成后，本地多一块虚拟网卡
-[root@CT6-1 openvpn]# ifconfig 
-tun0      Link encap:UNSPEC  HWaddr 00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00  
-          inet addr:192.168.117.1  P-t-P:192.168.117.2  Mask:255.255.255.255
-          UP POINTOPOINT RUNNING NOARP MULTICAST  MTU:1500  Metric:1
-          RX packets:0 errors:0 dropped:0 overruns:0 frame:0
-          TX packets:0 errors:0 dropped:0 overruns:0 carrier:0
-          collisions:0 txqueuelen:100 
-          RX bytes:0 (0.0 b)  TX bytes:0 (0.0 b)
-[root@CT6-1 openvpn]# 
-
-设置开机自启
-[root@CT6-1 openvpn]# echo '#startup openvpn service by oldboy' >> /etc/rc.local 
-[root@CT6-1 openvpn]# 
-[root@CT6-1 openvpn]# echo '/usr/local/sbin/openvpn --config /etc/openvpn/server.conf &'>> /etc/rc.local 
-[root@CT6-1 openvpn]# 
-[root@CT6-1 openvpn]# tail -2 /etc/rc.local 
-#startup openvpn service by oldboy
-/usr/local/sbin/openvpn --config /etc/openvpn/server.conf &
-
-
-配置常规方式启动openvpn服务
-============================================================================
-[root@CT6-1 openvpn]# cp /home/oldboy/tools/openvpn/openvpn-2.2.2/sample-scripts/openvpn.init /etc/init.d/openvpn
-[root@CT6-1 openvpn]# chmod 700 /etc/init.d/openvpn 
-[root@CT6-1 openvpn]# chkconfig --add openvpn
-[root@CT6-1 openvpn]# chkconfig --list openvpn
-openvpn        	0:关闭	1:关闭	2:关闭	3:启用	4:启用	5:启用	6:关闭
-
-[root@CT6-1 openvpn]# vim /etc/init.d/openvpn 
-148         for c in `/bin/ls server.conf 2>/dev/null`; do
-防止启动启动出错，需要将启动文件的148行的"*.conf"改为"server.conf"
-
-[root@CT6-1 openvpn]# pkill openvpn
-[root@CT6-1 openvpn]# 
-[root@CT6-1 openvpn]# service openvpn start
-正在启动 openvpn：                                         [确定]
-[root@CT6-1 openvpn]# 
-
-
-配置windows客户端
-=============================================================================
-在http://openvpn.software.informer.com/download/#downloading下载windows客户端openvpn-2.2.2-install.exe
-然后“下一步、下一步”完成安装
-
-下载证书文件到windows中（这里专给test用户）
-[root@CT6-1 openvpn]# mv client.conf  keys/
-[root@CT6-1 openvpn]# 
-[root@CT6-1 openvpn]# cd keys/
-[root@CT6-1 keys]# ls
-01.pem  ca.crt       dh1024.pem  ett.key         index.txt.attr.old  serial.old  server.key  test.csr
-02.pem  ca.key       ett.crt     index.txt       index.txt.old       server.crt  ta.key      test.key
-03.pem  client.conf  ett.csr     index.txt.attr  serial              server.csr  test.crt
-                                                    
-[root@CT6-1 keys]# sz -y ca.crt  test.crt  test.key  client.conf
 
 
