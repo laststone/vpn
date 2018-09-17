@@ -46,17 +46,20 @@ sz /data/openvpn/conf/zhangsan.ovpn
 
 
 13.为了方便管理: 使用如下两个脚本来删除用户和创建用户
-## 创建用户
+##创建用户
 -----------------------
+```
 #!/bin/bash
 read -p "please your username: " NAME
 docker run -v /data/openvpn:/etc/openvpn --rm -it kylemanna/openvpn:2.4 easyrsa build-client-full $NAME nopass
 docker run -v /data/openvpn:/etc/openvpn --rm kylemanna/openvpn:2.4 ovpn_getclient $NAME > /data/openvpn/conf/"$NAME".ovpn
 docker restart openvpn
 注意: 需要手动修改xx.ovpn文件中的vpn端口为11194 (默认是1194) --- 否则不能连接
+```
 -----------------------
 ##删除用户
 -----------------------
+```
 #!/bin/bash
 read -p "Delete username: " DNAME
 docker run -v /data/openvpn:/etc/openvpn --rm -it kylemanna/openvpn:2.4 easyrsa revoke $DNAME
@@ -66,6 +69,7 @@ docker run -v /data/openvpn:/etc/openvpn --rm -it kylemanna/openvpn:2.4 rm -f /e
 docker run -v /data/openvpn:/etc/openvpn --rm -it kylemanna/openvpn:2.4 rm -f /etc/openvpn/pki/issued/"$DNAME".crt
 docker restart openvpn
 rm -rf  /data/openvpn/conf/$DNAME.ovpn
+```
 -----------------------
 注意: 删除一个用户后,需要删除其在/data/openvpn/conf/下的username.ovpn文件
 
